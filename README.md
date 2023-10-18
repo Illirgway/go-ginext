@@ -7,7 +7,8 @@ Extends functionality for [Gin - fast web framework](https://github.com/gin-goni
 
 ### Automatic registration of complex controllers
 
-Instead of registering 
+Instead of registering many single handler function, use controller type and its methods to automatically
+create appropriate gin router paths using the below functionality
 
 #### Controller type, its instance (object) and endpoint methods
 

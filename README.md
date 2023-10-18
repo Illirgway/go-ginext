@@ -1,0 +1,139 @@
+
+# Go [Gin](https://github.com/gin-gonic/gin) Extender package
+
+Extends functionality for [Gin - fast web framework](https://github.com/gin-gonic/gin) 
+
+## Usage
+
+### Automatic registration of complex controllers
+
+Instead of registering 
+
+#### Controller type, its instance (object) and endpoint methods
+
+`Controller` is an any type (and so its instance), which have at least one `endpoint` method.
+`endpoint` is a common type method (with `Controller` type receiver) of `gin.HandlerFunc` signature
+`func (*gin.Context)` and specific format of its name: `EpMethodName = <HttpMethod><Endpoint>`, where
+`<HttpMethod>` is one of RFC7231 http methods `[Get Head Post Put Delete Connect Options Trace]` and
+`<Endpoint>` is standard go method name CamelCase suffix, which will be final endpoint of full abs 
+router path to this method, automagically converting from `CamelCase` to `kebab-case`, e.g. 
+
+```gotemplate
+
+type ControllerExample struct {}
+
+func (c *ControllerExample) GetUserName(ctx * gin.Context) {
+	ctx.String(http.StatusOK, "hello from GetUserName")
+}
+
+func main () {
+
+	// ...
+
+	r := gin.New()
+	
+	c := &ControllerExample{}
+	
+	ginext.EmbedController(r, c)
+	
+	// now after starting r listening on port 8080, 
+	// you can request GET `http://localhost:8080/user-name` ==> "hello from GetUserName"
+	
+	// ...
+}
+```
+
+If you want to attach `Controller` to source `IRoute` as base segment of `endpoint`s set, use `ginext.AttachController` -
+kebab-case'd controller name without optional `Controller` prefix would be used as segment name:
+
+```gotemplate
+
+type ControllerCommonSegment struct {}
+
+func (c *ControllerCommonSegment) PostSaveData(ctx *gin.Context) {
+	ctx.String(http.StatusOK, "hello from PostSaveData")
+}
+
+// can use empty name to register "" (index) endpoint
+func (c *ControllerCommonSegment) Get(ctx *gin.Context) {
+	ctx.String(http.StatusOK, "hello from Get - root [index] endpoint")
+}
+
+
+func main () {
+
+	// ...
+
+	r := gin.New()
+	
+	c := &ControllerCommonSegment{}
+	
+	ginext.AttachController(r, c)
+	
+	// now after starting r listening on port 8080, 
+	// GET `http://localhost:8080/common-segment/` ==> "hello from Get - root [index] endpoint"
+	// POST `http://localhost:8080/common-segment/save-data` ==> "hello from PostSaveData"
+	
+	// ...
+}
+```   
+
+#### Append trailing slashes to controller method `endpoint`s on registration
+
+Use `ginext.AppendTrailingSlash(true)` before registration by `AttachController` / `EmbedController` to enable 
+automatic trailing slash append
+
+```gotemplate
+
+type ControllerExample struct {}
+
+func (c *ControllerExample) GetUserName(ctx *gin.Context) {
+	ctx.String(http.StatusOK, "hello from GetUserName")
+}
+
+func main () {
+
+	// ...
+
+	r := gin.New()
+	
+	c := &ControllerExample{}
+	
+	ginext.AppendTrailingSlash(true) // before `ginext.EmbedController` 
+	
+	ginext.EmbedController(r, c)
+	
+	// now after starting r listening on port 8080, 
+	// you can request GET `http://localhost:8080/user-name/` ==> "hello from GetUserName"
+	
+	// ...
+}
+```
+
+#### Any gin router type
+
+`AppendController` and `EmbedController` use gin interface `gin.IRoutes` as `router` arg, so you may use either `gin.Engine` or 
+`gin.RouterGroup`, including groups with attached middleware (e.g. `auth` and `session` mws) and path's prefix
+
+#### Additional examples
+
+See `router_test.go`
+
+### TODO
+
+* more tests required
+* implement endpoint ctx Params (the easiest way is to append `CatchAll` option to `endpoint`s paths)
+
+## LICENSE
+
+This program is free software: you can redistribute it and/or modify it under the terms of the 
+GNU General Public License as published by the Free Software Foundation, either version 3 of the License, 
+or (at your option) any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied 
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with this program.
+If not, see <https://www.gnu.org/licenses/>.
+
+Copyright &copy; 2023 Illirgway

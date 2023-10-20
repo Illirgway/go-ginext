@@ -44,7 +44,24 @@ type RouterGroup interface {
 }
 */
 
-type RouterGroup = gin.IRoutes
+type (
+	RouterGroup = gin.IRoutes
+
+	HandlerFunc          = func(ctx *gin.Context)
+	ControllerInitMethod = func() error
+
+	/* TODO
+	// can't use IRoutes because of BasePath absence
+	RouterGroup interface {
+		Handle(string, string, ...gin.HandlerFunc) gin.IRoutes
+		Any(string, ...gin.HandlerFunc) gin.IRoutes
+
+		BasePath() string
+	}
+
+	ControllerInitMethod = func(absPath string) error
+	*/
+)
 
 var (
 	// RFC7231 Section 4.3
@@ -68,17 +85,17 @@ func EmbedController(rg RouterGroup, instance interface{}) error {
 	return registerController(rg, instance, false)
 }
 
-func registerController(rg RouterGroup, instance interface{}, prependControllerEndpoint bool) error {
+const (
+	errRegisterControllerPrefix = "ginext.registerController error: "
+)
 
-	const (
-		errPrefix = "ginext.registerController error: "
-	)
+func registerController(rg RouterGroup, instance interface{}, prependControllerEndpoint bool) (err error) {
 
 	v := reflect.ValueOf(instance)
 	k := v.Kind()
 
 	if k != reflect.Ptr && k != reflect.Interface {
-		return fmt.Errorf(errPrefix+"wrong instance type: %[1]T (value %[1]v)", instance)
+		return fmt.Errorf(errRegisterControllerPrefix+"wrong instance type: %[1]T (value %[1]v)", instance)
 	}
 
 	t, e := v.Type(), v.Elem()
@@ -89,7 +106,7 @@ func registerController(rg RouterGroup, instance interface{}, prependControllerE
 	n := t.NumMethod()
 
 	if n == 0 {
-		return fmt.Errorf(errPrefix+"controller instance %v (%[1]T): methods not found", instance)
+		return fmt.Errorf(errRegisterControllerPrefix+"controller instance %v (%[1]T): methods not found", instance)
 	}
 
 	controllerName := e.Type().Name()
@@ -102,6 +119,61 @@ func registerController(rg RouterGroup, instance interface{}, prependControllerE
 		}
 	}
 
+	// Init, Before, After
+	methodValue := v.MethodByName("Init")
+
+	// SEE https://github.com/golang/go/issues/46320#issuecomment-1081940201
+	if methodValue.IsValid() && !methodValue.IsNil() {
+
+		// TODO absPath
+		//absPath := joinPaths(rg.BasePath, controllerEndpoint)
+
+		initInstance := methodValue.Interface()
+		initMethod, ok := initInstance.(ControllerInitMethod)
+
+		if !ok {
+			return fmt.Errorf(errRegisterControllerPrefix+"controller instance %v of type %[1]T has Init method with wrong signature %T", instance, initInstance)
+		}
+
+		// early call before method registration
+		if err = initMethod(); err != nil {
+			return fmt.Errorf(errRegisterControllerPrefix+"controller instance %v of type %[1]T Init err: %w", instance, err)
+		}
+	}
+
+	// equivalent of struct { Before, handler, After } as an array,
+	// possibleHandlers[0] = Before
+	// possibleHandlers[1] = methodHandler
+	// possibleHandlers[2] = After
+	var (
+		possibleHandlers [3]gin.HandlerFunc
+		actualHandlers   = possibleHandlers[:]
+	)
+
+	// Before
+
+	if possibleHandlers[0], err = extractWrapperMethod(instance, &v, "Before"); err != nil {
+		return err
+	}
+
+	// shift actualHandlers if no Before
+	if possibleHandlers[0] == nil {
+		actualHandlers = actualHandlers[1:]
+	}
+
+	// After
+
+	if possibleHandlers[2], err = extractWrapperMethod(instance, &v, "After"); err != nil {
+		return err
+	}
+
+	// shift actualHandlers if no After
+	if possibleHandlers[2] == nil {
+		actualHandlers = actualHandlers[:len(actualHandlers)-1]
+	}
+
+	// now actualHandlers slices non-nil wrapper methods + handler (possibleHandlers[1])
+
 	for i := 0; i < n; i++ {
 
 		mi := t.Method(i)
@@ -113,29 +185,52 @@ func registerController(rg RouterGroup, instance interface{}, prependControllerE
 				e = controllerEndpoint + "/" + e
 			}
 
-			if appendTrailingSlash {
+			if appendTrailingSlash && e[len(e)-1] != '/' { // avoid double trailing slash
 				e = e + "/"
 			}
 
 			// method's instance with stored receiver
 			methodInstance := v.Method(i).Interface()
 
-			// ATN! not .(HandlerFunc) :: panic: interface conversion: interface {} is func(*gin.Context), not gin.HandlerFunc [recovered]
-			ginMethod, ok := methodInstance.(func(*gin.Context))
+			var ok bool
+
+			// ATN! not gin.HandlerFunc :: panic: interface conversion: interface {} is func(*gin.Context), not gin.HandlerFunc [recovered]
+			possibleHandlers[1], ok = methodInstance.(HandlerFunc)
 
 			if !ok {
-				return fmt.Errorf(errPrefix+"controller instance %v of type %[1]T has action method %v with wrong signature %T", instance, name, methodInstance)
+				return fmt.Errorf(errRegisterControllerPrefix+"controller instance %v of type %[1]T has action method %v with wrong signature %T", instance, name, methodInstance)
 			}
 
 			if m == methodActionNotch {
-				rg.Any(e, ginMethod)
+				rg.Any(e, actualHandlers...)
 			} else {
-				rg.Handle(m, e, ginMethod)
+				rg.Handle(m, e, actualHandlers...)
 			}
 		}
 	}
 
 	return nil
+}
+
+func extractWrapperMethod(instance interface{}, v *reflect.Value, method string) (gin.HandlerFunc, error) {
+
+	methodValue := v.MethodByName(method)
+
+	// SEE https://github.com/golang/go/issues/46320#issuecomment-1081940201
+	if methodValue.IsValid() && !methodValue.IsNil() {
+
+		methodInstance := methodValue.Interface()
+
+		// ATN! not gin.HandlerFunc :: panic: interface conversion: interface {} is func(*gin.Context), not gin.HandlerFunc [recovered]
+		if wrapperMethod, ok := methodInstance.(HandlerFunc); ok {
+			return wrapperMethod, nil
+		}
+
+		// !ok => error wrong type
+		return nil, fmt.Errorf(errRegisterControllerPrefix+"controller instance %v of type %[1]T has wrapper method %v with wrong signature %T", instance, method, methodInstance)
+	}
+
+	return nil, nil
 }
 
 func decodeControllerMethod(method string) (m, e string) {

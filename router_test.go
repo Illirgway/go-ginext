@@ -19,10 +19,13 @@
 package ginext
 
 import (
+	"errors"
 	"github.com/gin-gonic/gin"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -202,28 +205,6 @@ const (
 	errStr405 = "405 method not allowed"
 )
 
-var testRouterControllerCommonValues = []*testCase{
-	{http.MethodGet, "/", http.StatusNotFound, errStr404},
-	//
-	{http.MethodGet, "/common/", http.StatusOK, "ControllerCommon.GET [index]"},
-	{http.MethodGet, "/common/endpoint", http.StatusOK, "ControllerCommon.GET:Endpoint"},
-	{http.MethodPost, "/common/endpoint", http.StatusOK, "ControllerCommon.POST:Endpoint"},
-	{http.MethodPut, "/common/endpoint", http.StatusMethodNotAllowed, errStr405},
-	//
-	{http.MethodGet, "/common/data", http.StatusMethodNotAllowed, errStr405},
-	{http.MethodPost, "/common/data", http.StatusOK, "ControllerCommon.POST:Data"},
-	//
-	{http.MethodGet, "/common/known", http.StatusOK, "ControllerCommon.Action:Known"},
-	{http.MethodPost, "/common/known", http.StatusOK, "ControllerCommon.Action:Known"},
-	{http.MethodPut, "/common/known", http.StatusOK, "ControllerCommon.Action:Known"},
-	//
-	{http.MethodGet, "/common/ignore-this-method", http.StatusNotFound, errStr404},
-	{http.MethodPost, "/common/ignore-this-method2", http.StatusNotFound, errStr404},
-	//
-	{http.MethodGet, "/common/unknown", http.StatusNotFound, errStr404},
-	{http.MethodPost, "/common/unknown", http.StatusNotFound, errStr404},
-}
-
 func helperRunTestsForRouter(t *testing.T, r *gin.Engine, cases []*testCase) {
 
 	for _, tcase := range cases {
@@ -279,17 +260,39 @@ func testControllerInternal1(t *testing.T, c interface{}, prepend bool, tests []
 	}
 
 	helperRunTestsForRouter(t, r, tests)
-
-	return
 }
 
+//
 // go test -count=1 -v -run "^TestRegisterControllerCommon1$"
+
+var testRouterControllerCommonValues = []*testCase{
+	{http.MethodGet, "/", http.StatusNotFound, errStr404},
+	//
+	{http.MethodGet, "/common/", http.StatusOK, "ControllerCommon.GET [index]"},
+	{http.MethodGet, "/common/endpoint", http.StatusOK, "ControllerCommon.GET:Endpoint"},
+	{http.MethodPost, "/common/endpoint", http.StatusOK, "ControllerCommon.POST:Endpoint"},
+	{http.MethodPut, "/common/endpoint", http.StatusMethodNotAllowed, errStr405},
+	//
+	{http.MethodGet, "/common/data", http.StatusMethodNotAllowed, errStr405},
+	{http.MethodPost, "/common/data", http.StatusOK, "ControllerCommon.POST:Data"},
+	//
+	{http.MethodGet, "/common/known", http.StatusOK, "ControllerCommon.Action:Known"},
+	{http.MethodPost, "/common/known", http.StatusOK, "ControllerCommon.Action:Known"},
+	{http.MethodPut, "/common/known", http.StatusOK, "ControllerCommon.Action:Known"},
+	//
+	{http.MethodGet, "/common/ignore-this-method", http.StatusNotFound, errStr404},
+	{http.MethodPost, "/common/ignore-this-method2", http.StatusNotFound, errStr404},
+	//
+	{http.MethodGet, "/common/unknown", http.StatusNotFound, errStr404},
+	{http.MethodPost, "/common/unknown", http.StatusNotFound, errStr404},
+}
 
 func TestRegisterControllerCommon1(t *testing.T) {
 	testControllerInternal1(t, &ControllerCommon{t: t}, true, testRouterControllerCommonValues)
 }
 
 //
+// go test -count=1 -v -run TestTreeControllerRoot1
 
 var (
 	testControllerRoot1Values = []*testCase{
@@ -316,11 +319,12 @@ var (
 	}
 )
 
-// go test -count=1 -v -run TestTreeControllerRoot1
-
 func TestRegisterControllerRoot1(t *testing.T) {
 	testControllerInternal1(t, &ControllerRoot{t}, false, testControllerRoot1Values)
 }
+
+//
+// go test -count=1 -v -run TestRegisterControllerCompound1
 
 var (
 	testControllerCompound1Values = []*testCase{
@@ -348,12 +352,129 @@ var (
 	}
 )
 
-// go test -count=1 -v -run TestRegisterControllerCompound1
-
 func TestRegisterControllerCompound1(t *testing.T) {
 
 	c := &ControllerCompound{ControllerEmbedded{t, false}}
 
 	testControllerInternal1(t, c, true, testControllerCompound1Values)
+}
 
+//
+// ==============
+
+type ControllerTestInit struct {
+	t *testing.T
+}
+
+func (c *ControllerTestInit) Init() error {
+	return errors.New("ControllerTestInit.Init works fine!")
+}
+
+func (c *ControllerTestInit) Get(ctx *gin.Context) {
+	ctx.String(http.StatusBadRequest, "ControllerTestInit.Get Should not happen")
+}
+
+type ControllerTestBefore struct {
+	t *testing.T
+}
+
+func (c *ControllerTestBefore) Before(ctx *gin.Context) {
+	ctx.String(http.StatusTeapot, "ControllerTestBefore.Before")
+	ctx.Abort()
+}
+
+func (c *ControllerTestBefore) Get(ctx *gin.Context) {
+	ctx.String(http.StatusBadRequest, "ControllerTestBefore.Get Should not happen")
+}
+
+type ControllerTestAfter struct {
+	t *testing.T
+}
+
+func (c *ControllerTestAfter) After(ctx *gin.Context) {
+	c.t.Log("ControllerTestAfter.After")
+	ctx.String(http.StatusTeapot, "ControllerTestAfter.After")
+}
+
+func (c *ControllerTestAfter) Get(ctx *gin.Context) {
+	//no-op
+}
+
+type ControllerTestWrappers struct {
+	t *testing.T
+	a []string
+}
+
+func (c *ControllerTestWrappers) Init() error {
+	c.a = append(c.a, "init")
+	return nil
+}
+
+func (c *ControllerTestWrappers) Before(ctx *gin.Context) {
+	c.a = append(c.a, "before")
+}
+
+func (c *ControllerTestWrappers) After(ctx *gin.Context) {
+	c.a = append(c.a, "after")
+}
+
+func (c *ControllerTestWrappers) PutIndex(ctx *gin.Context) {
+	c.a = append(c.a, "handler")
+	ctx.String(http.StatusAccepted, "ControllerTestWrappers.GetIndex")
+}
+
+var (
+	testControllerWithWrappers1Before = []*testCase{
+		{http.MethodGet, "/test-before/", http.StatusTeapot, "ControllerTestBefore.Before"},
+	}
+
+	testControllerWithWrappers1After = []*testCase{
+		{http.MethodGet, "/test-after/", http.StatusTeapot, "ControllerTestAfter.After"},
+	}
+
+	testControllerWithWrappers1Wrappers = []*testCase{
+		{http.MethodPut, "/test-wrappers/index", http.StatusAccepted, "ControllerTestWrappers.GetIndex"},
+	}
+)
+
+// go test -count=1 -v -run TestRegisterControllerWithWrappers1
+
+func TestRegisterControllerWithWrappers1(t *testing.T) {
+
+	// init
+
+	ci := &ControllerTestInit{t}
+
+	r := newRouter()
+
+	// indirect error
+	if r == nil {
+		t.Error("newRouter() returns nil")
+		return
+	}
+
+	err := registerController(r, ci, false)
+
+	if err == nil || !strings.HasSuffix(err.Error(), "ControllerTestInit.Init works fine!") {
+		t.Error(err)
+		return
+	}
+
+	// before
+	testControllerInternal1(t, &ControllerTestBefore{t}, true, testControllerWithWrappers1Before)
+
+	// after
+	testControllerInternal1(t, &ControllerTestAfter{t}, true, testControllerWithWrappers1After)
+
+	// all together
+	cw := &ControllerTestWrappers{t, nil}
+
+	testControllerInternal1(t, cw, true, testControllerWithWrappers1Wrappers)
+
+	t.Logf("ControllerTestWrappers handlers seq: %v", cw.a)
+
+	if wantSeq := []string{"init", "before", "handler", "after"}; !reflect.DeepEqual(cw.a, wantSeq) {
+		t.Errorf("ControllerTestWrappers erroneous handlers seq: got %v, want %v", cw.a, wantSeq)
+		return
+	}
 }

@@ -23,7 +23,7 @@ router path to this method, automagically converting from `CamelCase` to `kebab-
 
 type ControllerExample struct {}
 
-func (c *ControllerExample) GetUserName(ctx * gin.Context) {
+func (c *ControllerExample) GetUserName(ctx *gin.Context) {
 	ctx.String(http.StatusOK, "hello from GetUserName")
 }
 
@@ -77,7 +77,53 @@ func main () {
 	
 	// ...
 }
-```   
+```
+
+#### Additional optional wrapper handlers
+
+You may use special Controller's methods `Init`, `Before` and `After` for additional control:
+
+```gotemplate
+type ControllerWithWrappers struct {}
+
+func (c *ControllerWithWrappers) Init() error {
+	fmt.Println("this is init")
+	return nil
+}
+
+func (c *ControllerWithWrappers) Before(ctx *gin.Context) {
+	fmt.Println("before")
+}
+
+func (c *ControllerWithWrappers) Get(ctx *gin.Context) {
+	fmt.Println("get")
+}
+
+func (c *ControllerWithWrappers) After(ctx *gin.Context) {
+	fmt.Println("after")
+}
+
+func main () {
+
+	// ...
+
+	r := gin.New()
+	
+	c := &ControllerWithWrappers{}
+	
+	ginext.AttachController(r, c) // immediately prints "this is init"
+	
+	// now after starting r listening on port 8080, 
+	// you can request GET `http://localhost:8080/user-name/` ==> prints "before" "get" "after", each on new line
+	
+	// ...
+}
+```
+
+`Init` is special method of signature `ControllerInitMethod = func() error`, which is calling when controller starting register in router and
+may returns error, which immediately breaks registration and returns to a superior caller
+
+`Before` and `After` is the common Gin HandlerFunc, which wrapped every registered explicit handler of the controller
 
 #### Append trailing slashes to controller method `endpoint`s on registration
 
@@ -85,7 +131,6 @@ Use `ginext.AppendTrailingSlash(true)` before registration by `AttachController`
 automatic trailing slash append
 
 ```gotemplate
-
 type ControllerExample struct {}
 
 func (c *ControllerExample) GetUserName(ctx *gin.Context) {
@@ -111,7 +156,7 @@ func main () {
 }
 ```
 
-#### Any gin router type
+#### Any Gin router type
 
 `AppendController` and `EmbedController` use gin interface `gin.IRoutes` as `router` arg, so you may use either `gin.Engine` or 
 `gin.RouterGroup`, including groups with attached middleware (e.g. `auth` and `session` mws) and path's prefix

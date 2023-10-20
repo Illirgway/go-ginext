@@ -114,7 +114,7 @@ func main () {
 	ginext.AttachController(r, c) // immediately prints "this is init"
 	
 	// now after starting r listening on port 8080, 
-	// you can request GET `http://localhost:8080/user-name/` ==> prints "before" "get" "after", each on new line
+	// you can request GET `http://localhost:8080/with-wrappers/` ==> prints "before" "get" "after", each on new line
 	
 	// ...
 }

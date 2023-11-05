@@ -21,9 +21,9 @@ package ginext
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/stoewer/go-strcase"
-	"net/http"
 
 	"fmt"
+	"net/http"
 	"reflect"
 	"strings"
 )

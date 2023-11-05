@@ -1,8 +1,8 @@
 module github.com/Illirgway/go-ginext
 
-go 1.13
+go 1.14
 
 require (
-	github.com/gin-gonic/gin v1.7.7
+	github.com/gin-gonic/gin v1.8.2
 	github.com/stoewer/go-strcase v1.2.0
 )
